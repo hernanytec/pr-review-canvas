@@ -553,7 +553,7 @@ The data directory's `settings.yml` accepts these keys and values:
 | `skin`                 | `github`  | `terminal`, `github`, `olive`                                                    |
 | `theme`                | `auto`    | `auto`, `light`, `dark`                                                          |
 | `foldLevel`            | `light`   | `light`, `moderate`, `aggressive`                                                |
-| `layerView`            | `all`     | `all`, `one`                                                                     |
+| `layerView`            | `all`     | `all`, `one`, `board`                                                            |
 | `pointColors`          | `classic` | `classic`, `action`                                                              |
 | `chatAgent`            | `claude`  | `claude`, `codex` (2)                                                            |
 | `chatModel`            | `null`    | A model ID, or `null` for the agent's default (1) (2)                            |
@@ -644,6 +644,9 @@ start collapsed. Click the summary to expand them. Moves are detected within a f
 between files appear as deletions and additions. Edited moves keep their changed text visible.
 Collapsing content does not mark it reviewed.
 
+A layer's **Tests** table starts closed under a title that counts its entries, such as
+**Tests 6/7 covered · 1 missing**. Click the title to open the table.
+
 ### Reading levels
 
 The **Hide code** control, beside the review progress, sets how much of the canvas is hidden. The
@@ -701,6 +704,57 @@ first. Navigation writes the layer hash so a reload keeps your place. `k` on the
 returns to Overview. Landing on Other or a reviewed layer opens its body.
 Marking the last open file of a layer reviewed keeps you on that layer. The choice is saved as `layerView` in `settings.yml`, applies to the open page at once, and
 holds for every review until changed.
+
+### On a board
+
+Set **Show layers** to **on a board** in the settings dialog to read the review as a tree on a
+board you pan and zoom. The pull request is the root: its title, author, branches, state, and size
+move there from the header, and the overview's point counts and summary show under them. **Details**
+opens the rest of the overview: the PR description, the conversation, and the review history. The layers hang in a row under it, each with its description. An open
+layer's attention points hang in a column under it; a closed layer shows its title and description
+alone. The board takes the whole width: there is no rail, and AI Chat and your review float over
+the board behind their button in the corner.
+
+On the board you review a layer through its attention points, not its files. A layer's title bar
+counts its points that are no longer open, such as **1/3 points**: dismissed, posted, in your
+review, or resolved by the author. The layer shows done once none is open, and it counts as
+reviewed: the board marks it so, as the root's **layers reviewed** count, the sign-off, and the
+other views show. If one of its points opens again, the board clears that mark, but never one you
+set. A layer with no points says so and keeps its own **reviewed** box. The board shows no
+**Hide code** control: it shows code only in the side panel, which folds at your default level.
+
+The board guides you from point to point. Once you act on the point you have open, so that it is
+no longer open, the board closes it and, after a moment, opens the next open point: the next one in
+its layer, then the first in the next layer, then any you skipped. A layer you leave closes, and
+the next one opens. When no point is left open, the board says so and shows the whole tree. Close
+the point, click elsewhere, or press Escape first to stay where you are.
+
+- **Open a node:** every node starts as its title. Click a layer's title for its tests and points,
+  a point's title for its text, its commands, and the code it is about, and the root's
+  **Details** for the rest of the overview. The tree moves aside to make room. An opened layer comes into view at 100%, so you can
+  read it at once: centered when it fits the window with its points, and from its title when it
+  does not. An opened point comes to the middle of the board the same way, at the zoom you are at.
+  The board glides there, unless your system asks for reduced motion; a wheel or a press on the
+  board stops it.
+- **Read the code:** an opened point shows its anchored lines with three lines around them. They
+  are read-only; the point's own commands comment on it, and it shows no link to its line. A point
+  you acted on folds to its title and one line, its code with it, until you click **show**. While
+  a point is open, the rest of the board fades so you can read that point alone; closing it, a
+  click elsewhere, or Escape brings the board back. A link
+  to a file or a line from the tests or AI Chat opens that file in a panel at the side of the
+  board, with its whole diff and its comment commands. **close** puts it away.
+- **Move a node:** drag a node by its title bar. A layer takes its points with it. The board keeps
+  where you put each node in this browser; **tidy** puts every node back.
+- **Pan:** scroll, or drag the empty board. A drag with the middle button pans from anywhere.
+- **Zoom:** Ctrl or Cmd with the wheel, or a trackpad pinch, zooms at the pointer. The **−**, **+**,
+  and **fit** buttons in the corner zoom too. Below 50%, a click on a node zooms in to it.
+
+The board opens on the pull request: the root in the middle of the window, at 100% unless it is
+wider than the window. A root taller than the window, as with a large summary or diagram, shows
+from its title. Until you move the board, the root stays in view while its diagram draws.
+A link in the URL then goes on to its target; a key or a canvas link opens the layer and the node
+that hold its target, at 100%. **fit** shows the whole tree. Comments, drafts, and
+dismissals work as in the other views. The choice is saved as `layerView` in `settings.yml`.
 
 ### Finding shared canvases
 

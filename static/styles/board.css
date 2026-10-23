@@ -1,0 +1,350 @@
+/* ---- Board: `layerView: board` (board.js) ----
+   The board takes the whole width: no rail, and the chat pane floats over it. `#main` holds the
+   bars, the viewport, and the zoom controls; the viewport scrolls the plane, and the plane carries
+   the zoom and the tree. `--board-h` is the height the window leaves between the header and the
+   footer, set on the layout, so the page itself never scrolls. */
+.layout:has(> main.board) {
+  grid-template-columns: minmax(0, 1fr);
+  background: none;
+}
+.layout:has(> main.board) > .rail {
+  display: none;
+}
+main.board {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--board-h, 100vh);
+  min-height: 360px;
+  padding: 0;
+  overflow: hidden;
+}
+main.board > :not(.board-viewport, .board-tools, .b-filepanel) {
+  flex: none;
+  margin: 8px 12px 0;
+}
+.board-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  cursor: grab;
+  background-color: var(--bg);
+}
+main.is-panning .board-viewport {
+  cursor: grabbing;
+}
+main:is(.is-panning, .is-dragging) {
+  user-select: none;
+}
+main.is-dragging,
+main.is-dragging .board-viewport * {
+  cursor: grabbing;
+}
+.board-plane {
+  position: relative;
+}
+.board-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.b-edge {
+  fill: none;
+  stroke: var(--dc, var(--line));
+  stroke-width: 1.5;
+  opacity: 0.45;
+}
+.b-trunk {
+  stroke-width: 2;
+  opacity: 0.8;
+}
+.board-tools {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--shadow) 20%, transparent);
+}
+.board-zoom {
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* ---- Nodes. board.js places each one; its card is the element it holds. ---- */
+.bnode {
+  position: absolute;
+  width: 300px;
+  cursor: auto;
+}
+.bnode :is(.hdr-title, .layer-h, .f-title) {
+  cursor: grab;
+}
+main.is-far .bnode,
+main.is-far .bnode * {
+  cursor: zoom-in;
+}
+.b-root,
+.b-layer > pr-layer > section,
+.b-point .findings > li {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--shadow) 15%, transparent),
+    0 6px 18px color-mix(in srgb, var(--shadow) 10%, transparent);
+  overflow: hidden;
+}
+
+/* The root: the header's title block, moved here, and the overview once opened. */
+/* As wide as its title on one line, and no less than 560; open, no less than 760. The overview
+   takes no part in that width, so its text wraps to the title instead of stretching the card. */
+.bnode.b-root {
+  width: max-content;
+  min-width: 560px;
+  border-top: 4px solid var(--accent);
+}
+.bnode.b-root.is-open {
+  min-width: 760px;
+}
+.layout .b-root .hdr-title {
+  margin: 0;
+  padding: 14px 18px 6px;
+  border: 0;
+  background: transparent;
+}
+.b-root .hdr-title h1 {
+  font-size: 18px;
+  line-height: 1.3;
+}
+.b-root #overview {
+  contain: inline-size;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+/* The summary shows under the title; the Details row under it opens the PR description, the
+   conversation, and the review history, which follow it. */
+.b-root #overview > * {
+  order: 2;
+}
+.b-root #overview > .body:not(.pr-desc, .conversation) {
+  order: 0;
+  padding-top: 4px;
+}
+.b-root #overview > .panel-h {
+  order: 1;
+  border: 0;
+  background: transparent;
+  padding: 0 18px 12px;
+  cursor: pointer;
+}
+.b-root #overview > .panel-h h2 {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.b-root #overview > .panel-h h2::before {
+  content: '▸ ';
+}
+.b-root.is-open #overview > .panel-h h2::before {
+  content: '▾ ';
+}
+/* The board shows no diff but in the side panel, so the Hide code control has nothing to hide. */
+.layout > main.board .b-root .hdr-title .reading {
+  display: none;
+}
+.b-root:not(.is-open) #overview > :not(.panel-h, .body:not(.pr-desc, .conversation)) {
+  display: none;
+}
+
+/* A layer: its title, its count of points done, and its rationale; its tests once opened. Its points
+   hang below it as nodes of their own; its files have none. The board has room, so the card is as wide as its title bar on
+   one line, and no less than 300; open, no less than 560. The body takes no part in that width, so
+   a long paragraph wraps to the title bar instead of stretching the card. */
+.b-layer > pr-layer > section {
+  border-top: 4px solid var(--dc);
+}
+.bnode.b-layer {
+  width: max-content;
+  min-width: 300px;
+}
+.bnode.b-layer:has(.layer-body:not([hidden]), details[open]) {
+  min-width: 560px;
+}
+.b-layer :is(.layer-body, details > .body, section > .rationale) {
+  contain: inline-size;
+}
+/* The rationale sits under the title, open or closed; the board moves it there. */
+.b-layer section > .rationale {
+  padding: 0 14px 12px;
+  font-size: 13px;
+}
+.b-layer section > .rationale:empty,
+.b-layer .layer-body > .body:empty,
+.b-layer .layer-h h2 .lbl {
+  display: none;
+}
+.b-layer .layer-h {
+  border-bottom: 0;
+  background: transparent;
+  padding: 10px 14px;
+}
+.b-layer .layer-h h2 {
+  font-size: 15px;
+  cursor: pointer;
+}
+.layout > main.board .b-layer :is(.layer-points, .files, .layer-end),
+.b-layer .lbl.sub:has(+ .files),
+.layout > main.board .b-layer .layer-ctl .cmd[data-act='ask'],
+.layout > main.board .b-layer:not(.no-points) .layer-ctl .chk {
+  display: none;
+}
+/* A layer is reviewed through its points; one with none keeps its own reviewed box. */
+.b-progress {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.b-layer.is-done .b-progress {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.b-layer.is-done .b-progress::before {
+  content: '✓ ';
+}
+
+/* A point: its level and title; the rest once opened. */
+.b-point .findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.b-point .findings > li {
+  padding: 8px 12px;
+}
+.b-point.is-open {
+  width: 760px;
+}
+.b-point .f-title {
+  font-size: 13px;
+}
+.b-point:not(.is-open) .findings > li > div > :not(.f-title),
+.b-point:not(.is-open) .f-title :is(.pill.kind, .p-toggle),
+.b-point .f-title .loc {
+  /* The point's link to its line goes: the code is under the point once it opens. */
+  display: none;
+}
+
+/* An opened point takes the focus: the rest of the board fades behind it, and comes back once the
+   point closes, the reader clicks elsewhere, or presses Escape. */
+.bnode,
+.board-lines {
+  transition: opacity 0.2s ease;
+}
+main.has-focus :is(.bnode:not(.is-focus), .board-lines) {
+  opacity: 0.1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bnode,
+  .board-lines {
+    transition: none;
+  }
+}
+
+/* Under an opened point, the code it is about, joined to its card. */
+.b-snippet {
+  margin-top: -6px;
+  padding-top: 6px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--panel);
+  overflow: auto;
+}
+/* A point the reader acted on folds to its title and one line; its code folds with it, until
+   **show** opens the point again. */
+.b-point:not(.is-open) > .b-snippet,
+.b-point:has([data-point].is-handled:not([data-expanded])) > .b-snippet {
+  display: none;
+}
+.b-snippet .unavailable {
+  padding: 10px 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* A file has no node: a link into one opens it in this panel over the side of the board. */
+.b-filepanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 80%);
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--shadow) 25%, transparent);
+}
+.b-filepanel[hidden] {
+  display: none;
+}
+.b-filepanel-h {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.b-filepanel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ---- The chat pane floats over the board at every width, as on a narrow screen. ---- */
+.layout:has(> main.board) > dialog.chat-dialog {
+  position: fixed;
+  inset: auto 20px 20px auto;
+  width: min(420px, calc(100vw - 40px));
+  height: min(680px, calc(100dvh - 40px));
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 8px 32px #0004;
+  overflow: hidden;
+  z-index: 11;
+}
+.layout:has(> main.board) > .chat-dialog .chat {
+  position: relative;
+  top: auto;
+  height: 100%;
+  padding: 0;
+}

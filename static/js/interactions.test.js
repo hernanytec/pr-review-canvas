@@ -669,7 +669,8 @@ describe('attention points', () => {
       expect(el?.getAttribute('data-status')).toBe('dismissed')
       expect(el?.hasAttribute('data-expanded')).toBe(false)
     }
-    expect(root.querySelector('.point-count')?.textContent).toBe('0')
+    // The dismissed point stays on the page under the heading, which says so in words.
+    expect(root.querySelector('.point-count')?.textContent).toBe('none open')
     expect(root.querySelector('.point-statuses')?.textContent).toContain('1 dismissed')
   })
 
@@ -2235,7 +2236,6 @@ describe('the AI Chat commands', () => {
       reducedMotion: true,
       api: {
         fetchThreads: async () => ({ threads: [], activeThread: null, agent: 'claude' }),
-        createThread: async () => ({ threads: [], activeThread: null, agent: 'claude' }),
         fetchThreadHistory: async () => ({ name: 't', turns: [] }),
         cancelChat: async () => ({ cancelled: true }),
         streamChat: async (_pr, _input, opts) => {

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { ChatContext } from '../../static/js/chat-context.js'
 import { SideSchema } from './review-artifact.js'
 
 // The context helpers live in static/js/chat-context.js so the browser can load them without a
@@ -9,6 +10,7 @@ export {
   chatContextFromElement,
   chatContextLabel,
   sameChatContext,
+  threadOfPlace,
   WHOLE_PR,
 } from '../../static/js/chat-context.js'
 
@@ -29,10 +31,16 @@ export const ChatContextSchema = z.discriminatedUnion('kind', [
 /** A message longer than this is a paste, not a question. */
 export const CHAT_MESSAGE_MAX = 8000
 
+/** How many of a thread's answers the reader has not seen. */
+export const ChatUnseenSchema = z.object({ unseen: z.number().int().min(0).max(1000) })
+
 export const ChatSendSchema = z.object({
   message: z.string().min(1).max(CHAT_MESSAGE_MAX),
   context: ChatContextSchema,
-  /** The thread to answer in; the active one when absent. */
+  /**
+   * The thread to answer in, while it is the chat agent's. Absent, the question goes to its
+   * place's thread when the reader keeps a thread per place, or starts a new thread.
+   */
   thread: z.string().min(1).max(200).optional(),
 })
 export type ChatSendInput = z.infer<typeof ChatSendSchema>
@@ -56,7 +64,17 @@ export const ChatTurnSchema = z.object({
 export type ChatTurn = z.infer<typeof ChatTurnSchema>
 
 export interface ChatThreadsResponse {
-  threads: Array<{ name: string; agent: string; title: string; createdAt: string }>
+  threads: Array<{
+    name: string
+    agent: string
+    title: string
+    createdAt: string
+    /** The turns the thread has taken. */
+    turns: number
+    anchor?: ChatContext
+    /** The answers the reader has not seen there yet. */
+    unseen?: number
+  }>
   activeThread: string | null
   /** The agent the next thread would use, from the settings plus any flag override. */
   agent: string

@@ -346,8 +346,8 @@ If the install fails, the current version runs the remaining steps itself.
 Last, `upgrade` checks the project's own [prompt templates](#prompt-templates). For each token a
 release after the old version added to a bundled template, a custom copy that lacks it is named
 with the token and the heading the bundled template has it under, for you to add. Run at the
-latest version with nothing to upgrade, it names the tokens that version added. It never edits a
-template.
+latest version with nothing to upgrade, it names the tokens that version added; so does a run
+whose plan is declined or not applied. It never edits a template.
 
 - `--only` limits the run to the named kinds. Skipped kinds are listed in `notes`.
 - `upgrade` does not install a missing acpx or add a missing skill copy. It prints the command
@@ -358,8 +358,8 @@ template.
 
 Without a terminal, `upgrade` prints the plan and changes nothing. `--yes` applies it without
 asking. The plan and each step's outcome go to stderr. With `--json`, or when stdout is a pipe,
-stdout is one JSON line with `applied` and, after applying, `ok` and each step's `status` (`done`
-or `failed`, with a `detail`), and `prompts`, the tokens the project's templates lack. The exit
+stdout is one JSON line with `applied`, `prompts`, the tokens the project's templates lack, and,
+after applying, `ok` and each step's `status` (`done` or `failed`, with a `detail`). The exit
 code is `1` when a step fails; a missing token does not change it. When a skill copy changes,
 stderr says to commit and push it.
 
@@ -559,6 +559,7 @@ The data directory's `settings.yml` accepts these keys and values:
 | `chatModel`            | `null`    | A model ID, or `null` for the agent's default (1) (2)                            |
 | `chatTimeoutSec`       | `600`     | Integer seconds, 30–3600                                                         |
 | `maxTurns`             | `null`    | Integer 1–100, or `null` for the agent's default                                 |
+| `chatThreadPerPlace`   | `true`    | `true` opens the thread of the place asked about; `false` uses the open one      |
 | `checkoutEnabled`      | `true`    | `true` reads a [review checkout](#review-checkouts); `false` reads your checkout |
 | `checkoutIdleDays`     | `7`       | Integer 1–365, or `-1` to never remove an idle checkout                          |
 | `checkoutSweepMinutes` | `60`      | Integer minutes, 5–1440, between `serve`'s idle sweeps                           |
@@ -790,8 +791,9 @@ callers, whatever it takes to change the code back. **critical** cannot be taken
 ships, such as data lost or exposed, content shared that was not meant to be, an outage, or a break
 for callers. **high** shows users or callers wrong behavior until a fix ships. **low** goes
 unnoticed outside the code: the cost is rework or readability.
-Its card shows the impact next to the title, and `decide` points list the worst impact first. A
-canvas generated before impact existed shows its `decide` points without one.
+Its card shows the impact next to the title, in the color of the **decide** icon: filled for
+**critical**, outlined for **high**, and dashed for **low**. `decide` points list the worst impact
+first. A canvas generated before impact existed shows its `decide` points without one.
 
 The icons are red, amber, and gray by default. Set **Point colors** in the settings dialog to
 **action** for purple, blue, and gray instead, so no level reads as a warning. The choice is saved
@@ -811,7 +813,9 @@ Acting on it changes its status:
 - **dismissed**: you took it off your own list. Other readers still see it open.
 
 When more than one applies, the point shows the first one in this order: resolved, posted, in your
-review, dismissed.
+review, dismissed. A resolved point keeps the drafts you added before the author resolved it: its
+line says your draft still waits, the expanded point lists it, and the draft itself says the author
+resolved the point. Send or delete it as you choose.
 
 A point you acted on stays in its layer and on its line in the diff. It collapses to its title, its
 status, and one line: the start of the reason, the comment link, or a note that the draft waits.
@@ -822,7 +826,8 @@ deleting the draft. The point collapses again when its status changes. A reload 
 
 The counts in the rail, the layer headings, and the overview squares include only open points. The
 overview line **Attention points: 2 open · 1 in your review · 1 resolved by the author · …** counts
-each status. Resolved points start off the page for every reader, the author too: **show the N
+each status, and adds **(N with your draft in the review)** after the resolved ones that still hold
+a draft. Resolved points start off the page for every reader, the author too: **show the N
 resolved** brings them back, collapsed in place, until you click it again. A layer whose points are
 all resolved drops its **Attention points** heading while they are hidden. A link to a resolved
 point shows that one point, and a point you just resolved stays shown until the next load. The
@@ -858,8 +863,9 @@ A resolution is written into the canvas itself:
   reason posted as a comment does not mark the point posted, so a reopened point is open again.
 - The canvas comment is shared again at once, with the new counts. A reviewer's page reads it back
   when it opens and every two minutes after while its tab is in view, hides the newly resolved
-  points, updates the Conversation card, and says so. Each read fetches the pull request's comments,
-  and downloads the canvas only when they changed. When the author shared a newer canvas for the
+  points, updates the Conversation card, and says so. When one of them holds a draft in the
+  reviewer's pending review, the message says the review keeps it. Each read fetches the pull
+  request's comments, and downloads the canvas only when they changed. When the author shared a newer canvas for the
   same commit, the page says to **refresh** and stops reading. The author's Conversation card updates
   immediately and stays current after reload.
   When sharing fails, the resolution stays in your local canvas and the message says why.
@@ -888,6 +894,73 @@ A resolution is written into the canvas itself:
 Only the author can resolve: the server refuses anyone else with `NOT_AUTHOR`. An outdated canvas
 offers no **resolve**:
 regenerate it for the current head first.
+
+### Settled decisions
+
+A question the author already answered, before the canvas existed, can be recorded in the commit
+that carries the answer, so the canvas shows it as resolved instead of asking it again. Add one
+`Settled-decision` line per decision to the commit message, after the prose that explains it:
+
+```text
+fix(app): keep the sum in run()
+
+The spec says sum; a product would double-count retries.
+
+Settled-decision: src/app.ts:4 Should run() multiply instead? No: the spec says sum, not product
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+- `<path>:<line>` is the line the decision is about, in that commit's version of the file. Write
+  `<path>:<line>:old` for a line the change deleted, numbered as in the commit's parent. A colon
+  after the number and a leading `./` on the path are allowed. A line that does not read this way
+  is not a decision and is skipped.
+- The rest of the line is the question the decision answers, then the decision and its reason.
+  The question runs to the first `?` followed by a space, and titles the point; the answer after
+  it becomes the resolution's reason. Leave the question out and the whole text is both. Either
+  part longer than the reason limit is cut. Only a `?` followed by a space, outside backticks,
+  ends the question, so one inside a URL or quoted code such as `` `x ?? 0` `` does not, but a
+  reason with a `?` mid-sentence and no question in front is split there: start such a line with
+  its question. A line that ends with its question gives no answer, so it settles nothing: the
+  canvas gets no point for it, and the generator is told the question was raised and left open,
+  until a later line answers it.
+- The line counts wherever it sits in the message, at the start of a line or indented, in any
+  letter case. It
+  need not be in the block git reads as trailers, so a blank line before `Co-Authored-By` loses
+  nothing.
+- `prepare` reads the decisions of `merge-base..head` from the commits whose author email is the
+  one whoever runs it commits as (`GIT_AUTHOR_EMAIL`, else `user.email`), so a commit someone else
+  pushed to the branch cannot answer the author's questions. On a pull request it reads them only
+  when that person is the pull request's author, the same rule as **resolve**; a canvas anyone
+  else generates resolves no decision.
+- A new-side line is carried from its commit to the head, and an old-side line from the commit's
+  parent to the merge base (under the file's old name when the pull request renamed it, in the
+  parent too when the same commit did), while it reads the same at both ends: a commit that
+  changes the line and a later one that changes it back leave the decision on it. An old-side decision also needs
+  the diff to still delete its line, so a later commit that restores the line ends it. When the
+  line no longer reads the same, is no longer deleted, or is outside the diff, the decision is
+  context: the generator does not raise its question again unless the code contradicts the answer,
+  and the canvas gets no point for it. A rebase rewrites the versions the numbers refer to while the lines keep their
+  text, so after one a decision can land on another line, or be lost; regenerate with care, or
+  write the decision again.
+- Two decisions on the same line that ask the same question, or that both ask none: the later one
+  stands, which is how a decision is revised. Later means later in the history, parents before
+  children, whatever the commit dates say. Two questions about one line are two decisions, each
+  its own point with its own answer. There is no line that withdraws one. To ask its question
+  again, **reopen** its point on the canvas: every later canvas keeps it open, until a later
+  commit answers the same question on the same line again, which resolves it with that answer.
+  Changing the line it is about also makes the decision context.
+- Publish adds each decision in the diff to the canvas as a `decision` point for the author,
+  titled with its question (or with the decision when the line asks none), on its line, and
+  resolved with its reason as of its commit. The point's text names the commit and gives its
+  answer, so a copy of the point and what AI Chat is told about it carry the answer too. A
+  reopened one says the author reopened it on the canvas, with the commit's answer below as
+  context. These points are not the generator's to write and do
+  not count toward its attention points. A canvas holds at most 36 of them; past that, the oldest
+  are context. A reason the author wrote on the canvas for such a point stands over the commit's
+  when the canvas is generated again, while its `Settled-decision` line reads the same; a later
+  commit that changes its question or answer replaces it. A reason an earlier canvas took from a
+  commit gives way to the decisions read now.
+- The review loop skill in this repository writes these lines for the decisions its gate asks.
 
 ### Comments and sign-off
 
@@ -1074,15 +1147,47 @@ and keeps earlier threads. `--chat-agent` and `--chat-model` override saved pref
 that server run. Canvas generation models are configured separately in
 [`generation.models`](#project-config).
 
-**Ask** on a layer, file, attention point, or line selection chooses the context for your message.
-Choosing another target replaces it; **clear** returns to the whole PR. The `a` key asks about
-the focused target, and `/` focuses the message box.
+**Ask** on a layer, file, attention point, or line selection opens the thread of that place. The
+first ask about a place starts one, titled after it; a later ask about the same place comes back to
+it, history and all. A thread is made by its first question, so an ask you do not follow up leaves
+nothing behind. Lines match on their exact range: a different selection starts another thread. Each
+thread is a session of its own with the agent. The canvas goes with a thread's first question, and
+again when the PR's head, the folder the agent reads, or your right to resolve points changes. A
+place's thread belongs to the chat agent it was made with: after you switch agents, an ask about the
+place starts a new thread. The ask command of a place with a thread carries a dot, which fills with
+the accent when an answer arrived there while you were not reading it: you were reading another
+thread, the pane was minimized, or it showed another tab. The thread's name at the top of the pane
+counts the threads with such an answer, as in **2 new**, and the **AI Chat** tab and its launcher
+count the answers, up to 9, until you see each thread. The marks are kept with the review, so a
+reload keeps them. The line above the message box names the thread's place, with **go to code** to
+lead back to it and **clear** to take what the box holds to the latest thread about the whole PR,
+below any text that thread already had. Each thread keeps its own unsent text. The `a` key asks
+about the focused target, and `/` focuses the message box.
+
+The thread's name at the top of the pane opens the list of the review's threads, by kind of place
+(attention points, lines, files, layers, whole PR), with the number of questions in each and a
+filter; pick one to open it, or use the arrow keys and Enter. **new thread**, beside the name and at
+the bottom of the list, starts one about the whole PR, and an ask about the whole PR comes back to
+the latest of those. Threads saved before threads had a place appear in the list under whole PR.
+When the canvas is generated again without a thread's place, the thread's head says the place is no
+longer on this canvas, and its questions are about the whole PR.
+
+To send every ask to the open thread instead, clear **A thread per place** under **AI Chat** in
+**settings**, or set `chatThreadPerPlace: false` in [`settings.yml`](#local-settings-and-storage).
+An ask then only chooses the context of your next message, which the line above the message box
+names; choosing another target replaces it, and **clear** returns to the whole PR.
 
 Chat can propose an inline comment. A valid proposal appears with controls to post, edit,
 or copy it. A proposal outside the current diff remains text with an explanation.
 
-Use **stop** to interrupt a reply. Only one chat turn can run per PR at a time. A timeout or
-incomplete answer can be retried; increase `chatTimeoutSec` if replies need more time.
+Use **stop** to interrupt a reply. Only one chat turn can run per PR at a time. While an answer is
+coming in, ask, the list of threads, and **new thread** still open any thread, and the answer keeps
+arriving in its own. A question asked in another thread meanwhile waits, marked as waiting, and is
+sent once the answer ends; one question waits at a time. If the server cannot take it then, a
+message says so wherever you are, and its thread shows the question with the reason; for a question
+asked from **new thread**, the next new thread does. Updating the review while a question waits asks
+first, as it does for unsent text. A timeout or incomplete answer can be retried; increase
+`chatTimeoutSec` if replies need more time.
 
 ### Review checkouts
 
@@ -1303,4 +1408,5 @@ Validation reports name the field, file, hunk, or line to fix. Common groups are
 | `FOLD_MISSING`                                                  | Using diff rows in chunks: a file over 20 unannotated rows hides something; an open file over 60 folds half; a layer over 100 hides more at aggressive |
 | `TOO_MANY_POINTS`                                               | Count explicit points and missing-test entries together                                                                                                |
 | `POINT_IMPACT`                                                  | Every `decide` point has an impact, and no other point has one                                                                                         |
+| `POINT_LEVEL`                                                   | A `question` point is `decide` or `check`                                                                                                              |
 | `LINK_UNRESOLVED`, `DIAGRAM_NODE_UNKNOWN`, `DIAGRAM_LIMIT`      | Link targets, diagram node IDs, and diagram counts                                                                                                     |

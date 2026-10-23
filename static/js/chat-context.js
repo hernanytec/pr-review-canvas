@@ -15,6 +15,21 @@
 export const WHOLE_PR = { kind: 'pr' }
 
 /**
+ * The thread an ask about a place continues: the one this agent keeps for that place. A thread of
+ * another agent is not continued, since its session belongs to that agent. A thread with no place,
+ * one from before threads had a place included, is about the whole PR; new thread makes several of
+ * those, and an ask about the whole PR continues the latest.
+ * @template {{ agent: string, anchor?: ChatContext | undefined }} Thread
+ * @param {readonly Thread[]} threads
+ * @param {string} agent
+ * @param {ChatContext} place
+ * @returns {Thread | undefined}
+ */
+export function threadOfPlace(threads, agent, place) {
+  return threads.findLast(t => t.agent === agent && sameChatContext(t.anchor ?? WHOLE_PR, place))
+}
+
+/**
  * True when two contexts name the same target, so setting the second one changes nothing.
  * @param {ChatContext} a
  * @param {ChatContext} b
@@ -69,6 +84,26 @@ export function chatContextLabel(context, layerTitle, pointTitle) {
       const title = pointTitle?.(context.fingerprint)
       return title === undefined ? 'attention point' : `point · ${title}`
     }
+  }
+}
+
+/**
+ * A target's name without its kind, for a place that says the kind already: a group of the
+ * Threads tab, or the tag beside a thread's title. The whole PR has no name of its own.
+ * @param {Exclude<ChatContext, { kind: 'pr' }>} context
+ * @param {(layerId: string) => string | undefined} [layerTitle]
+ * @param {(fingerprint: string) => string | undefined} [pointTitle]
+ * @returns {string}
+ */
+export function chatContextName(context, layerTitle, pointTitle) {
+  switch (context.kind) {
+    case 'layer':
+      return layerTitle?.(context.layerId) ?? context.layerId
+    case 'point':
+      return pointTitle?.(context.fingerprint) ?? 'attention point'
+    case 'file':
+    case 'lines':
+      return chatContextLabel(context)
   }
 }
 

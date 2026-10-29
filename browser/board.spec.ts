@@ -174,7 +174,7 @@ test('drags a layer with what hangs from it, keeps it there after a reload, and 
   await showLayers(page, 'board')
   const layer = page.locator('.bnode.b-layer').first()
   const id = (await layer.getAttribute('data-node')) ?? ''
-  // Open, so its points and files are on the board to move with it.
+  // Open, so its points are on the board to move with it.
   await layer.locator('.layer-h h2').click()
   await settled(page)
   const leaf = layer.locator('xpath=following-sibling::div[contains(@class,"bnode")][1]')

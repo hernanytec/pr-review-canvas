@@ -1,11 +1,11 @@
 // @ts-check
 // The board. With `layerView: board` the review is a tree on a plane the reader pans and zooms:
 // the pull request at the root, its layers in a row under it, and under an open layer its
-// attention points and files. Every node starts closed, as a title; a click opens it in place, a
-// layer to its rationale and its points and files, a file to its diff, and the tree makes room. A drag moves a node and what hangs from it, and the board keeps
-// where the reader put it. The nodes hold the page's own elements (the overview, the layer
-// sections, the point cards, the file cards), moved onto the plane, so every command on them
-// works as in the other views; leaving the board puts each one back where the render put it.
+// attention points. Every node starts closed, as a title; a click opens it in place, and the tree
+// makes room. A file has no node: it opens in a side panel. A drag moves a node and what hangs
+// from it, and the board keeps where the reader put it. The nodes hold the page's own elements
+// (the overview, the layer sections, the point cards), moved onto the plane, so every command on
+// them works as in the other views; leaving the board puts each one back where the render put it.
 // The plane is a scroll container, so a scroll into view lands on a node, and the zoom is CSS
 // `zoom`, so text is laid out again at each zoom and stays sharp. With `all` and `one` this module
 // does nothing.
@@ -27,7 +27,7 @@ import { dotColor, setCardCollapsed } from './layers.js'
  */
 /**
  * The parts of a board on the page, and what to put back when it goes.
- * @typedef {{ main: HTMLElement, layout: HTMLElement, viewport: HTMLElement, plane: HTMLElement, lines: SVGSVGElement, tools: HTMLElement, panel: HTMLElement, shown: [Comment, Element] | null, focus: HTMLElement | null, move: number, untouched: boolean, watcher: MutationObserver | null, tree: PageNode, frames: Element[], added: Element[], renamed: Array<[Element, string]>, moved: Array<[Comment, Element]>, collapsed: Array<[Element, boolean]>, origin: { x: number, y: number }, pad: { x: number, y: number }, size: { w: number, h: number }, listeners: AbortController, observer: ResizeObserver | null }} Mounted
+ * @typedef {{ main: HTMLElement, layout: HTMLElement, viewport: HTMLElement, plane: HTMLElement, lines: SVGSVGElement, tools: HTMLElement, panel: HTMLElement, shown: [Comment, Element] | null, focus: HTMLElement | null, move: number, untouched: boolean, watcher: MutationObserver | null, tree: PageNode, nodes: Map<Element, PageNode>, frames: Element[], added: Element[], renamed: Array<[Element, string]>, moved: Array<[Comment, Element]>, collapsed: Array<[Element, boolean]>, origin: { x: number, y: number }, pad: { x: number, y: number }, size: { w: number, h: number }, listeners: AbortController, observer: ResizeObserver | null }} Mounted
  */
 
 export const MIN_ZOOM = 0.1
@@ -125,8 +125,8 @@ export function boardToolsHtml() {
 
 /**
  * Where each node of the tree goes, at zoom 1. The root sits above a row of layers, centered on
- * it; each layer heads a column, and its points and files stack down the column, indented, so a
- * layer with many files grows down and not across. A node of no height (a point the page hides)
+ * it; each layer heads a column, and its points stack down the column, indented, so a layer with
+ * many points grows down and not across. A node of no height (a point the page hides)
  * takes no room. An offset moves a node from its place, and what hangs from it with it.
  * @param {TreeNode} root
  * @param {ReadonlyMap<string, Offset>} [offsets]
@@ -171,7 +171,7 @@ export function layoutTree(root, offsets = new Map()) {
 
 /**
  * The line from a node to one of its children: from the bottom of the root down to the top of a
- * layer, or from a layer's trunk at the left of its column across to a point or a file.
+ * layer, or from a layer's trunk at the left of its column across to a point.
  * @param {Box} parent
  * @param {Box} child
  * @param {boolean} fromRoot
@@ -296,7 +296,7 @@ function browserStorage() {
  * render on a new tree at the zoom and place the reader left.
  * @param {HTMLElement} root
  * @param {{ view: LayerView, win?: Window, storage?: Storage | null, smooth?: boolean, advanceMs?: number }} opts
- * @returns {{ stop: () => void, setView: (view: LayerView) => void, redraw: () => void, zoom: () => number, setZoom: (zoom: number) => void, fit: () => void, relayout: () => void }}
+ * @returns {{ stop: () => void, setView: (view: LayerView) => void, redraw: () => void, zoom: () => number, setZoom: (zoom: number) => void }}
  */
 export function initBoard(root, opts) {
   const win = opts.win ?? window
@@ -559,6 +559,12 @@ export function initBoard(root, opts) {
   }
 
   /**
+   * The width of the board the file panel leaves free, at its left; what the board shows goes there.
+   * @param {Mounted} m
+   */
+  const freeWidth = m => m.viewport.clientWidth - (m.panel.hidden ? 0 : m.panel.offsetWidth)
+
+  /**
    * The scroll that shows a box: centered where it fits the window, from its top left where not.
    * @param {Mounted} m
    * @param {{ left: number, top: number, right: number, bottom: number }} b in plane pixels
@@ -572,10 +578,8 @@ export function initBoard(root, opts) {
      */
     const scrollFor = (start, length, space) =>
       length * zoom <= space - 2 * margin ? (start + length / 2) * zoom - space / 2 : start * zoom - margin
-    // The file panel covers the right of the board; what the board shows goes in the rest.
-    const covered = m.panel.hidden ? 0 : m.panel.offsetWidth
     return {
-      left: scrollFor(b.left, b.right - b.left, Math.max(0, m.viewport.clientWidth - covered)),
+      left: scrollFor(b.left, b.right - b.left, Math.max(0, freeWidth(m))),
       top: scrollFor(b.top, b.bottom - b.top, m.viewport.clientHeight),
     }
   }
@@ -635,8 +639,7 @@ export function initBoard(root, opts) {
    * @param {PageNode} point
    */
   const focusPoint = (m, point) => {
-    const covered = m.panel.hidden ? 0 : m.panel.offsetWidth
-    const room = m.viewport.clientWidth - covered - 2 * FOCUS_MARGIN
+    const room = freeWidth(m) - 2 * FOCUS_MARGIN
     const width = point.el.offsetWidth
     const fits = width > 0 ? room / width : POINT_ZOOM
     moveTo(m, Math.min(Math.max(zoom, POINT_ZOOM), Math.max(fits, FAR_ZOOM)), mm =>
@@ -740,8 +743,8 @@ export function initBoard(root, opts) {
       layerNode.style.setProperty('--dc', dotColor(tree.children.length))
       tree.children.push({ id, kind: 'layer', el: layerNode, children: leaves })
     }
-    // The layers go in after their points and files are lifted out, so each marker stays in its
-    // layer's list for the trip back.
+    // The layers go in after their points are lifted out, so each marker stays in its layer's list
+    // for the trip back.
     tree.children.forEach((node, i) => node.el.append(/** @type {Element} */ (layers[i])))
 
     const viewport = doc.createElement('div')
@@ -752,9 +755,15 @@ export function initBoard(root, opts) {
     lines.setAttribute('class', 'board-lines')
     lines.setAttribute('aria-hidden', 'true')
     plane.append(lines)
+    /**
+     * Each node by its element, for what the reader presses or clicks on.
+     * @type {Map<Element, PageNode>}
+     */
+    const nodes = new Map()
     /** @param {PageNode} node */
     const addNode = node => {
       plane.append(node.el)
+      nodes.set(node.el, node)
       node.children.forEach(addNode)
     }
     addNode(tree)
@@ -814,6 +823,7 @@ export function initBoard(root, opts) {
       untouched: true,
       watcher,
       tree,
+      nodes,
       frames,
       added,
       renamed,
@@ -829,12 +839,7 @@ export function initBoard(root, opts) {
     placeLayout(m)
     paint(m, zoom)
     arrange(m)
-    /** @param {PageNode} node */
-    const observe = node => {
-      observer?.observe(node.el)
-      node.children.forEach(observe)
-    }
-    observe(tree)
+    for (const el of nodes.keys()) observer?.observe(el)
     if (place !== null) {
       viewport.scrollLeft = (place.x + m.origin.x) * zoom
       viewport.scrollTop = (place.y + m.origin.y) * zoom
@@ -934,9 +939,10 @@ export function initBoard(root, opts) {
         const target = /** @type {Element} */ (event.target)
         const empty = target === viewport || target === plane
         const handle = target.closest(HANDLE_SELECTOR)
-        const nodeEl = handle?.closest('.bnode') ?? null
-        const node = nodeEl === null ? null : findNode(m.tree, nodeEl)
-        const draggable = event.button === 0 && node !== null && target.closest(CONTROL_SELECTOR) === null
+        const nodeEl = handle?.closest('.bnode')
+        const node = nodeEl ? m.nodes.get(nodeEl) : undefined
+        const draggable =
+          event.button === 0 && node !== undefined && target.closest(CONTROL_SELECTOR) === null
         if (!((event.button === 0 && empty) || event.button === 1 || draggable)) {
           return
         }
@@ -1048,8 +1054,8 @@ export function initBoard(root, opts) {
           const opened = nodeEl.classList.toggle('is-open')
           // An opened point takes the focus: the rest of the board fades behind it.
           if (nodeEl.matches('.b-point')) setFocus(m, opened ? nodeEl : null)
-          const point = opened ? findNode(m.tree, nodeEl) : null
-          if (point !== null && point.kind === 'point') focusPoint(m, point)
+          const point = opened ? m.nodes.get(nodeEl) : undefined
+          if (point?.kind === 'point') focusPoint(m, point)
         }
       },
       { capture: true, signal }
@@ -1076,20 +1082,6 @@ export function initBoard(root, opts) {
       },
       { capture: true, signal }
     )
-  }
-
-  /**
-   * @param {PageNode} node
-   * @param {Element} el
-   * @returns {PageNode | null}
-   */
-  const findNode = (node, el) => {
-    if (node.el === el) return node
-    for (const child of node.children) {
-      const found = findNode(child, el)
-      if (found !== null) return found
-    }
-    return null
   }
 
   /**
@@ -1164,8 +1156,8 @@ export function initBoard(root, opts) {
     m.panel.querySelector('.b-filepanel-body')?.append(file)
     m.panel.hidden = false
     // The point the reader opened the file from moves beside the panel, so both stay in view.
-    const point = m.focus === null ? null : findNode(m.tree, m.focus)
-    if (point !== null) focusPoint(m, point)
+    const point = m.focus === null ? undefined : m.nodes.get(m.focus)
+    if (point !== undefined) focusPoint(m, point)
   }
 
   /**
@@ -1181,33 +1173,28 @@ export function initBoard(root, opts) {
     m.panel.hidden = true
   }
 
+  /**
+   * Stops what a board listens to and the move it makes.
+   * @param {Mounted} m
+   */
+  const release = m => {
+    m.listeners.abort()
+    m.observer?.disconnect()
+    m.watcher?.disconnect()
+    stopMove(m)
+  }
+
   const unmount = () => {
     if (mounted === null) {
       return
     }
-    const {
-      main,
-      layout,
-      viewport,
-      tools,
-      panel,
-      frames,
-      added,
-      moved,
-      collapsed,
-      listeners,
-      observer,
-      watcher,
-    } = mounted
-    listeners.abort()
-    observer?.disconnect()
-    watcher?.disconnect()
-    stopMove(mounted)
+    const { main, layout, viewport, tools, panel, frames, added, moved, collapsed } = mounted
+    release(mounted)
     hideFile(mounted)
     panel.remove()
     for (const el of added) el.remove()
     for (const [el, text] of mounted.renamed) el.textContent = text
-    // Each point and file goes back where its marker is, each frame after the bars.
+    // Each element the board lifted goes back where its marker is, each frame after the bars.
     for (const [marker, el] of moved) marker.replaceWith(el)
     main.append(...frames)
     for (const [body, wasHidden] of collapsed) setCardCollapsed(body, wasHidden)
@@ -1227,10 +1214,7 @@ export function initBoard(root, opts) {
     }
     if (mounted === null || mounted.main !== main || !main.contains(mounted.viewport)) {
       // A render replaced `#main`, or its content: the old board went with it.
-      if (mounted !== null) stopMove(mounted)
-      mounted?.listeners.abort()
-      mounted?.observer?.disconnect()
-      mounted?.watcher?.disconnect()
+      if (mounted !== null) release(mounted)
       mounted = null
       mount(main)
     }
@@ -1299,12 +1283,6 @@ export function initBoard(root, opts) {
     zoom: () => zoom,
     setZoom: next => {
       if (mounted !== null) zoomAt(mounted, next)
-    },
-    fit: () => {
-      if (mounted !== null) fit(mounted)
-    },
-    relayout: () => {
-      if (mounted !== null) arrange(mounted)
     },
   }
 }

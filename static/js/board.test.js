@@ -153,6 +153,8 @@ const storage = () => /** @type {Storage} */ (
 const KEY = () => `pr-review.board:${window.location.pathname}`
 /** @param {import('./layer-views.js').LayerView} view */
 const open = view => initBoard(root, { view, storage: storage(), smooth: false })
+/** Waits for the observers' callbacks and the timers they start. @param {number} [ms] */
+const settle = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms + 5))
 const main = () => /** @type {HTMLElement} */ (root.querySelector('#main'))
 const viewport = () => /** @type {HTMLElement} */ (root.querySelector('.board-viewport'))
 /** @param {string} id */
@@ -203,7 +205,7 @@ const pointer = (type, target, init) =>
   target?.dispatchEvent(
     new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, button: 0, ...init })
   )
-/** Opens the first layer, so its points and files are on the board. */
+/** Opens the first layer, so its points are on the board. */
 const openAuth = () => click(node('layer-auth').querySelector('.layer-h h2'))
 /** @param {string} id */
 const bodyOf = id =>
@@ -354,8 +356,6 @@ describe('initBoard', () => {
     board = open('all')
     expect(root.querySelector('.board-plane')).toBeNull()
     board.setZoom(0.5)
-    board.fit()
-    board.relayout()
     expect(board.zoom()).toBe(1)
   })
 
@@ -395,8 +395,11 @@ describe('initBoard', () => {
     openAuth()
     expect(node('point-a').hidden).toBe(false)
     expect(root.querySelectorAll('.board-lines .b-edge:not(.b-trunk)')).toHaveLength(1)
-    // The page is as tall as the window.
-    expect(root.querySelector('.layout')?.getAttribute('style')).toContain('--board-h')
+    // The page is as tall as the window, also after the window resizes.
+    const layout = /** @type {HTMLElement} */ (root.querySelector('.layout'))
+    layout.style.removeProperty('--board-h')
+    window.dispatchEvent(new Event('resize'))
+    expect(layout.style.getPropertyValue('--board-h')).not.toBe('')
   })
 
   it('opens on the root, in the middle of the window, also when the URL names a target', () => {
@@ -414,21 +417,18 @@ describe('initBoard', () => {
     board = open('board')
     expect(board.zoom()).toBe(fitted)
     expect([viewport().scrollLeft, viewport().scrollTop]).toEqual(scroll)
-  })
-
-  it('opens fitted for a link to the overview', () => {
+    // A link to something outside every layer is the same.
+    board.stop()
     window.location.hash = '#overview'
     board = open('board')
-    expect(board.zoom()).toBeLessThan(1)
+    expect(board.zoom()).toBe(fitted)
   })
 
-  it('leaves a screen with no overview alone', () => {
+  it('leaves a screen with no overview alone, and a page with no main', () => {
     main().innerHTML = '<section id="empty-state"></section>'
     board = open('board')
     expect(root.querySelector('.board-plane')).toBeNull()
-  })
-
-  it('leaves a page with no main alone', () => {
+    board.stop()
     main().remove()
     board = open('board')
     expect(root.querySelector('.board-plane')).toBeNull()
@@ -456,9 +456,6 @@ describe('initBoard', () => {
     press('zoom-in')
     expect(board.zoom()).toBeCloseTo(1)
     press('fit')
-    expect(board.zoom()).toBeLessThan(1)
-    board.setZoom(1)
-    board.fit()
     expect(board.zoom()).toBeLessThan(1)
     board.setZoom(1)
     press('tidy')
@@ -503,7 +500,8 @@ describe('initBoard', () => {
     // A link in a point goes where it leads, and opens nothing.
     click(node('point-a').querySelector('.loc'))
     expect(node('point-a').classList.contains('is-open')).toBe(true)
-    board.relayout()
+    resized?.()
+    pendingFrame?.(0)
     // The open point is 760 wide, so the next column moves over.
     expect(at(node('layer-store'))[0]).toBeGreaterThan(storeX)
     // A click on the body of a node opens nothing more, nor does one on the empty plane.
@@ -548,14 +546,6 @@ describe('initBoard', () => {
     expect(viewport().scrollTop).toBeCloseTo(ly + 95 - 200)
   })
 
-  it('opens a layer and brings it into view even from far out', () => {
-    board = open('board')
-    board.setZoom(FAR_ZOOM / 2)
-    openAuth()
-    expect(bodyOf('layer-auth').hidden).toBe(false)
-    expect(board.zoom()).toBe(1)
-  })
-
   it('brings the Other layer into view once its details open, and nothing else that toggles', () => {
     main().insertAdjacentHTML(
       'beforeend',
@@ -594,6 +584,11 @@ describe('initBoard', () => {
     expect(board.zoom()).toBe(1)
     expect(node('root').classList.contains('is-open')).toBe(false)
     expect(viewport().scrollLeft).toBe(at(node('root'))[0] - 24)
+    // A click on a layer's title opens the layer even from far out, and brings it into view.
+    board.setZoom(FAR_ZOOM / 2)
+    openAuth()
+    expect(bodyOf('layer-auth').hidden).toBe(false)
+    expect(board.zoom()).toBe(1)
   })
 
   it('drags a layer with its points, saves where it went, and eats the click that ends it', () => {
@@ -717,6 +712,10 @@ describe('initBoard', () => {
     board.setZoom(0.2)
     root.querySelector('.stale-bar')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
     expect(board.zoom()).toBeCloseTo(0.2)
+    // The point the scroll landed on is in focus, until the board goes.
+    expect(main().classList.contains('has-focus')).toBe(true)
+    board.setView('all')
+    expect(main().classList.contains('has-focus')).toBe(false)
   })
 
   it('lays the tree out again on the next frame after a node changes size', () => {
@@ -747,14 +746,6 @@ describe('initBoard', () => {
     root.querySelector('#point-o')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
     expect(/** @type {HTMLDetailsElement} */ (root.querySelector('#layer-other details')).open).toBe(true)
     expect(node('point-o').hidden).toBe(false)
-  })
-
-  it('sets the height again when the window resizes', () => {
-    board = open('board')
-    const layout = /** @type {HTMLElement} */ (root.querySelector('.layout'))
-    layout.style.removeProperty('--board-h')
-    window.dispatchEvent(new Event('resize'))
-    expect(layout.style.getPropertyValue('--board-h')).not.toBe('')
   })
 
   it('puts everything back for another view, and says the board changed', () => {
@@ -838,7 +829,7 @@ describe('the points a layer is reviewed through', () => {
     expect(node('layer-store').classList.contains('no-points')).toBe(true)
     // Dismissing the open point finishes the layer, on the next frame after the status changes.
     root.querySelector('#point-a')?.setAttribute('data-status', 'dismissed')
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await settle()
     pendingFrame?.(0)
     expect(progress()[0]).toBe('2/2 points')
     expect(node('layer-auth').classList.contains('is-done')).toBe(true)
@@ -902,14 +893,6 @@ describe('the point in focus', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(focused()).toBe(false)
   })
-
-  it('focuses a point a link lands on, and lets go of it when the board goes', () => {
-    board = open('board')
-    root.querySelector('#point-a')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
-    expect(focused()).toBe(true)
-    board.setView('all')
-    expect(main().classList.contains('has-focus')).toBe(false)
-  })
 })
 
 describe('a scroll to a layer', () => {
@@ -924,10 +907,7 @@ describe('a scroll to a layer', () => {
     // Closed, it is 300 by 60: it fits the window, so it is centered both ways.
     expect(viewport().scrollLeft).toBeCloseTo(lx + 150 - 300)
     expect(viewport().scrollTop).toBeCloseTo(ly + 30 - 200)
-  })
-
-  it('does nothing once the board is gone', () => {
-    board = open('board')
+    // Once the board is gone, the frame does nothing.
     root.querySelector('#layer-auth')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
     board.setView('all')
     expect(() => pendingFrame?.(0)).not.toThrow()
@@ -1021,20 +1001,16 @@ describe('the moves the board makes', () => {
     expect(board.zoom()).toBeCloseTo(536 / 760)
   })
 
-  it('stops a move when the board goes', () => {
-    const cancel = vi.spyOn(window, 'cancelAnimationFrame')
-    board = initBoard(root, { view: 'board', storage: storage(), smooth: true })
-    press('fit')
-    board.setView('all')
-    expect(cancel).toHaveBeenCalledWith(7)
-  })
-
-  it('stops a move when a render replaces the board', () => {
+  it('stops a move when a render replaces the board, and when the board goes', () => {
     const cancel = vi.spyOn(window, 'cancelAnimationFrame')
     board = initBoard(root, { view: 'board', storage: storage(), smooth: true })
     press('fit')
     root.innerHTML = PAGE
     board.redraw()
+    expect(cancel).toHaveBeenCalledWith(7)
+    cancel.mockClear()
+    press('fit')
+    board.setView('all')
     expect(cancel).toHaveBeenCalledWith(7)
   })
 })
@@ -1055,8 +1031,6 @@ describe('moving on after the reader acts on a point', () => {
         '<div class="layer-points"><ol class="findings"><li class="finding" id="point-c" data-point="c" data-status="open"><div><div class="f-title"><span class="p-title">Check C</span></div></div></li></ol></div>'
       )
   }
-  /** @param {number} [ms] */
-  const settle = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms + 5))
   /** @param {string} id @param {string} status */
   const mark = (id, status) => root.querySelector(`#${id}`)?.setAttribute('data-status', status)
   const focusedId = () => root.querySelector('.bnode.is-focus')?.getAttribute('data-node') ?? null
@@ -1217,7 +1191,6 @@ describe('a layer whose points are all done', () => {
     box.addEventListener('change', () => changes(box.checked))
     return { box, changes }
   }
-  const settle = () => new Promise(resolve => setTimeout(resolve, 5))
 
   it('marks the layer reviewed, and clears the mark when a point opens again', async () => {
     const { box, changes } = reviewedBox()
@@ -1229,7 +1202,8 @@ describe('a layer whose points are all done', () => {
     expect(box.checked).toBe(true)
     expect(changes).toHaveBeenLastCalledWith(true)
     // Drawn again with the box checked, the board does not click it twice.
-    board.relayout()
+    resized?.()
+    pendingFrame?.(0)
     expect(changes).toHaveBeenCalledTimes(1)
     root.querySelector('#point-a')?.setAttribute('data-status', 'open')
     await settle()
@@ -1320,16 +1294,5 @@ describe('the file of the point in focus', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(panel.hidden).toBe(true)
     expect(root.querySelector('#layer-auth .files > pr-file > #file-auth')).not.toBeNull()
-  })
-
-  it('opens no file for a point with no line to link to', () => {
-    vi.mocked(followLink).mockClear()
-    root.querySelector('#point-a .loc')?.remove()
-    window.location.hash = '#layer-auth'
-    board = open('board')
-    openAuth()
-    click(node('point-a').querySelector('.p-title'))
-    expect(followLink).not.toHaveBeenCalled()
-    expect(root.querySelector('.b-filepanel')?.hasAttribute('hidden')).toBe(true)
   })
 })

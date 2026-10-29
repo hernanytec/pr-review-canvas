@@ -731,19 +731,21 @@ the next one opens. When no point is left open, the board says so and shows the 
 the point, click elsewhere, or press Escape first to stay where you are.
 
 - **Open a node:** every node starts as its title. Click a layer's title for its tests and points,
-  a point's title for its text, its commands, and the code it is about, and the root's
+  a point's title for its text, its commands, and its file, and the root's
   **Details** for the rest of the overview. The tree moves aside to make room. An opened layer comes into view at 100%, so you can
   read it at once: centered when it fits the window with its points, and from its title when it
   does not. An opened point comes to the middle of the board the same way, at the zoom you are at.
   The board glides there, unless your system asks for reduced motion; a wheel or a press on the
   board stops it.
-- **Read the code:** an opened point shows its anchored lines with three lines around them. They
-  are read-only; the point's own commands comment on it, and it shows no link to its line. A point
-  you acted on folds to its title and one line, its code with it, until you click **show**. While
-  a point is open, the rest of the board fades so you can read that point alone; closing it, a
-  click elsewhere, or Escape brings the board back. A link
-  to a file or a line from the tests or AI Chat opens that file in a panel at the side of the
-  board, with its whole diff and its comment commands. **close** puts it away.
+- **Read the code:** opening a point puts it in focus, and its file opens in a panel at the side of
+  the board, at the point's line, with its whole diff and its comment commands; the point moves
+  beside the panel, narrower and zoomed in a little (115%, less if the window is narrow), so both
+  show. While a point is open, the rest of the board fades so
+  you can read that point alone; closing it, a click elsewhere, or Escape brings the board back
+  and puts the file away. The point shows no link to its line, since its file opens with it. A
+  link to a file or a line from the tests or AI Chat opens that file in the panel too. The attention points in the panel show as
+  one line each, so the code reads on; click a point's title to open it. A point you acted on
+  folds to its title and one line until you click **show**. **close** puts the file away.
 - **Move a node:** drag a node by its title bar. A layer takes its points with it. The board keeps
   where you put each node in this browser; **tidy** puts every node back.
 - **Pan:** scroll, or drag the empty board. A drag with the middle button pans from anywhere.

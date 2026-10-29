@@ -88,27 +88,32 @@ test('shows the review as a tree with the pull request at its root, clean of the
   const point = page.locator('.bnode.b-point:visible').first()
   await expect(point).toBeVisible()
   await expect(page.locator('.board-lines .b-edge:not(.b-trunk)').first()).toBeAttached()
-  // A point opens to its text, its commands, and the code it is about.
+  // A point opens to its text and its commands, and its file opens in the side panel at its line,
+  // beside the point.
   await point.locator('.p-title').click()
   await expect(point.locator('[data-act="point-dismiss"]')).toBeVisible()
-  await expect(point.locator('.b-snippet table.diff')).toBeVisible()
-  await expect(point.locator('.b-snippet [id]')).toHaveCount(0)
+  const panel = page.locator('.b-filepanel')
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('article.file .diff-host table.diff').first()).toBeVisible()
+  await settled(page)
+  const pointBox = await point.boundingBox()
+  const panelBox = await panel.boundingBox()
+  expect((pointBox?.x ?? 0) + (pointBox?.width ?? 0)).toBeLessThanOrEqual(panelBox?.x ?? 0)
   // The open point is in focus: the rest of the board fades behind it, until Escape.
   await expect(page.locator('#main')).toHaveClass(/\bhas-focus\b/)
   await expect(layers.first()).toHaveCSS('opacity', '0.1')
   await expect(point).toHaveCSS('opacity', '1')
+  // Escape ends the focus and puts the file away.
   await page.keyboard.press('Escape')
   await expect(layers.first()).toHaveCSS('opacity', '1')
+  await expect(panel).toBeHidden()
+  // The point shows no link to its line: opened again, it opens its file again, and close puts
+  // the file away.
+  await expect(point.locator('.f-title .loc')).toBeHidden()
   await point.locator('.p-title').click()
   await point.locator('.p-title').click()
   await expect(page.locator('#main')).toHaveClass(/\bhas-focus\b/)
-  // The point shows no link to its line: its code is under it. A link to a line from elsewhere,
-  // such as the tests or AI Chat, opens the whole file in the side panel, and close puts it back.
-  await expect(point.locator('.f-title .loc')).toBeHidden()
-  await point.locator('.f-title .loc').evaluate(link => (link as HTMLAnchorElement).click())
-  const panel = page.locator('.b-filepanel')
   await expect(panel).toBeVisible()
-  await expect(panel.locator('article.file .diff-host table.diff').first()).toBeVisible()
   await panel.locator('[data-board="close-file"]').click()
   await expect(panel).toBeHidden()
 })
@@ -144,7 +149,7 @@ test('takes the reader from each point they dismiss to the next, until the layer
   // With its points done, the layer counts as reviewed on the root, though the board has no box.
   await expect(reviewed).toHaveText(new RegExp(`^${layersBefore + 1} of \\d+ layers reviewed`))
 
-  // A dismissed point opened again shows its title and one line; its code waits for show too.
+  // A dismissed point opened again shows its title and one line until show; its file opens.
   // Marked reviewed, the layer folds; the reader opens it again.
   const done = page.locator(`.bnode[data-node="${id}"]`)
   await expect(done.locator('section > .layer-body')).toBeHidden()
@@ -155,9 +160,10 @@ test('takes the reader from each point they dismiss to the next, until the layer
     .filter({ has: page.locator('[data-status="dismissed"]') })
     .first()
   await dismissed.locator('.p-title').click()
-  await expect(dismissed.locator('.b-snippet')).toBeHidden()
+  await expect(dismissed.locator('.prose')).toBeHidden()
+  await expect(page.locator('.b-filepanel')).toBeVisible()
   await dismissed.locator('[data-act="point-expand"]').click()
-  await expect(dismissed.locator('.b-snippet table.diff')).toBeVisible()
+  await expect(dismissed.locator('.prose')).toBeVisible()
 })
 
 test('drags a layer with what hangs from it, keeps it there after a reload, and tidies it back', async ({

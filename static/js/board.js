@@ -10,12 +10,10 @@
 // `zoom`, so text is laid out again at each zoom and stays sharp. With `all` and `one` this module
 // does nothing.
 import { toast } from './commands.js'
-import { renderDiff } from './diff-renderer.js'
-import { dotColor, getRenderContext, hunkIdForPoint, setCardCollapsed } from './layers.js'
+import { followLink } from './deep-link.js'
+import { dotColor, setCardCollapsed } from './layers.js'
 
 /** @typedef {import('./layer-views.js').LayerView} LayerView */
-/** @typedef {import('./contract-types.js').Point} Point */
-/** @typedef {import('./contract-types.js').FileEntry} FileEntry */
 /** @typedef {'root' | 'layer' | 'point'} NodeKind */
 /**
  * A node of the tree as the layout reads it: its size at zoom 1, and its children.
@@ -40,6 +38,8 @@ export const FAR_ZOOM = 0.5
 export const ADVANCE_MS = 500
 /** How long the board takes to move to what the reader opened, in milliseconds. */
 export const MOVE_MS = 300
+/** The zoom an opened point is brought to, a little closer than the rest of the board. */
+export const POINT_ZOOM = 1.15
 /** The room left around an opened layer brought into view, in screen pixels. */
 const FOCUS_MARGIN = 32
 /** How much one press of a zoom button changes the zoom. */
@@ -65,8 +65,6 @@ const NODE_CLASSES = /** @type {const} */ ({
   layer: 'bnode b-layer',
   point: 'bnode b-point',
 })
-/** How many lines around a point's own the code under an opened point shows. */
-export const SNIPPET_CONTEXT = 3
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
 /**
@@ -263,51 +261,6 @@ function capture(el, pointerId) {
   } catch {
     // Nothing to capture.
   }
-}
-
-/**
- * The code a point is about, for its node: the rows of its hunk from a few lines before its own to
- * a few after, read-only. The rows keep no ids and no comment buttons: the file's own card holds
- * those, and a link to a line lands there. The point's own commands comment on it.
- * @param {Point} point
- * @param {{ files: ReadonlyArray<FileEntry>, patches: Record<string, string> | null }} ctx
- * @param {Document} doc
- * @returns {string}
- */
-export function pointSnippetHtml(point, ctx, doc) {
-  const entry = ctx.files.find(f => f.path === point.path)
-  const patch = entry === undefined ? undefined : ctx.patches?.[entry.key]
-  if (entry === undefined || patch === undefined) {
-    return '<div class="unavailable">The code of this point is not available locally.</div>'
-  }
-  const template = doc.createElement('template')
-  template.innerHTML = renderDiff(entry, patch, { hunkIds: new Set([hunkIdForPoint(point, entry)]) })
-  const from = point.line - SNIPPET_CONTEXT
-  const to = (point.endLine ?? point.line) + SNIPPET_CONTEXT
-  const column = point.side === 'old' ? 0 : 1
-  const rows = Array.from(template.content.querySelectorAll('tbody > tr'))
-  const near = rows.flatMap((row, i) => {
-    const n = Number(row.querySelectorAll('td.ln')[column]?.textContent || Number.NaN)
-    return n >= from && n <= to ? [i] : []
-  })
-  // A point whose line the hunk lacks shows the start of the hunk, from its first numbered row.
-  const start = rows.findIndex(row =>
-    Array.from(row.querySelectorAll('td.ln')).some(td => td.textContent !== '')
-  )
-  const first = near.length === 0 ? Math.max(0, start) : Math.min(...near)
-  const last = near.length === 0 ? first + to - from : Math.max(...near)
-  rows.forEach((row, i) => {
-    if (i < first || i > last) row.remove()
-  })
-  for (const el of template.content.querySelectorAll('[id], [data-hunk], [data-key]')) {
-    el.removeAttribute('id')
-    el.removeAttribute('data-hunk')
-    el.removeAttribute('data-key')
-  }
-  for (const button of template.content.querySelectorAll('.plus')) button.remove()
-  const holder = doc.createElement('div')
-  holder.append(template.content)
-  return holder.innerHTML
 }
 
 /**
@@ -619,8 +572,10 @@ export function initBoard(root, opts) {
      */
     const scrollFor = (start, length, space) =>
       length * zoom <= space - 2 * margin ? (start + length / 2) * zoom - space / 2 : start * zoom - margin
+    // The file panel covers the right of the board; what the board shows goes in the rest.
+    const covered = m.panel.hidden ? 0 : m.panel.offsetWidth
     return {
-      left: scrollFor(b.left, b.right - b.left, m.viewport.clientWidth),
+      left: scrollFor(b.left, b.right - b.left, Math.max(0, m.viewport.clientWidth - covered)),
       top: scrollFor(b.top, b.bottom - b.top, m.viewport.clientHeight),
     }
   }
@@ -673,12 +628,20 @@ export function initBoard(root, opts) {
   }
 
   /**
-   * Brings an opened point into the middle of the board, at the zoom the reader is at.
+   * Brings an opened point into the middle of the board, zoomed in a little so it reads well, or
+   * more if the reader is zoomed in further. Beside the file panel the point zooms only as far as
+   * it still fits the room the panel leaves.
    * @param {Mounted} m
    * @param {PageNode} point
    */
   const focusPoint = (m, point) => {
-    moveTo(m, zoom, mm => scrollToShow(mm, boxOf([point]), FOCUS_MARGIN))
+    const covered = m.panel.hidden ? 0 : m.panel.offsetWidth
+    const room = m.viewport.clientWidth - covered - 2 * FOCUS_MARGIN
+    const width = point.el.offsetWidth
+    const fits = width > 0 ? room / width : POINT_ZOOM
+    moveTo(m, Math.min(Math.max(zoom, POINT_ZOOM), Math.max(fits, FAR_ZOOM)), mm =>
+      scrollToShow(mm, boxOf([point]), FOCUS_MARGIN)
+    )
   }
 
   /**
@@ -924,6 +887,22 @@ export function initBoard(root, opts) {
     m.panel
       .querySelector('[data-board="close-file"]')
       ?.addEventListener('click', () => hideFile(m), { signal })
+    // In the panel, the points in the diff are one line each; a click on one's title opens it.
+    m.panel.addEventListener(
+      'click',
+      event => {
+        const target = /** @type {Element} */ (event.target)
+        const row = target.closest('tr.ifind')
+        if (
+          row !== null &&
+          target.closest('.f-title') !== null &&
+          target.closest(CONTROL_SELECTOR) === null
+        ) {
+          row.classList.toggle('b-open')
+        }
+      },
+      { signal }
+    )
 
     viewport.addEventListener(
       'wheel',
@@ -1067,7 +1046,6 @@ export function initBoard(root, opts) {
         // The root and a point open on a click on their title bar; a layer on its title.
         if (target.closest('.b-root .hdr-title, .b-root .panel-h, .b-point .f-title') !== null) {
           const opened = nodeEl.classList.toggle('is-open')
-          if (opened) addSnippet(nodeEl)
           // An opened point takes the focus: the rest of the board fades behind it.
           if (nodeEl.matches('.b-point')) setFocus(m, opened ? nodeEl : null)
           const point = opened ? findNode(m.tree, nodeEl) : null
@@ -1115,23 +1093,6 @@ export function initBoard(root, opts) {
   }
 
   /**
-   * Shows the code under an opened point, once: the rows of the file the point is anchored to.
-   * @param {HTMLElement} nodeEl
-   */
-  const addSnippet = nodeEl => {
-    const ctx = getRenderContext()
-    const id = nodeEl.querySelector('[data-point]')?.getAttribute('data-point')
-    const point = ctx?.artifact.points.find(p => p.id === id)
-    if (ctx === null || point === undefined || nodeEl.querySelector(':scope > .b-snippet') !== null) {
-      return
-    }
-    const snippet = doc.createElement('div')
-    snippet.className = 'b-snippet'
-    snippet.innerHTML = pointSnippetHtml(point, ctx, doc)
-    nodeEl.append(snippet)
-  }
-
-  /**
    * Takes the reader from a point they acted on to the next one still open: on in its layer, then
    * in the layers after it, then from the first layer for one they skipped. A layer left behind
    * closes, done, and the next one opens. With none left the board says so and shows the tree.
@@ -1162,7 +1123,6 @@ export function initBoard(root, opts) {
     const section = next.layer.el.querySelector('pr-layer > section')
     if (section && !layerOpen(next.layer.el)) openLayer(section)
     next.point.el.classList.add('is-open')
-    addSnippet(next.point.el)
     setFocus(m, next.point.el)
     focusPoint(m, next.point)
   }
@@ -1173,10 +1133,18 @@ export function initBoard(root, opts) {
    * @param {HTMLElement | null} el
    */
   const setFocus = (m, el) => {
+    if (el === m.focus) {
+      return
+    }
     m.focus?.classList.remove('is-focus')
     m.focus = el
     el?.classList.add('is-focus')
     m.main.classList.toggle('has-focus', el !== null)
+    // The point's file opens in the side panel at the point's line, the way its link does; the
+    // panel closes once no point is in focus.
+    const link = el?.querySelector('[data-point] .f-title .loc')?.getAttribute('href') ?? null
+    if (link === null) hideFile(m)
+    else followLink(link, root)
   }
 
   /**
@@ -1195,6 +1163,9 @@ export function initBoard(root, opts) {
     m.shown = [marker, file]
     m.panel.querySelector('.b-filepanel-body')?.append(file)
     m.panel.hidden = false
+    // The point the reader opened the file from moves beside the panel, so both stay in view.
+    const point = m.focus === null ? null : findNode(m.tree, m.focus)
+    if (point !== null) focusPoint(m, point)
   }
 
   /**
@@ -1203,6 +1174,7 @@ export function initBoard(root, opts) {
    */
   const hideFile = m => {
     if (m.shown !== null) {
+      for (const row of m.shown[1].querySelectorAll('tr.ifind.b-open')) row.classList.remove('b-open')
       m.shown[0].replaceWith(m.shown[1])
       m.shown = null
     }
@@ -1301,7 +1273,6 @@ export function initBoard(root, opts) {
       const opened = target.closest('.b-point, .b-root')
       if (opened instanceof HTMLElement) {
         opened.classList.add('is-open')
-        addSnippet(opened)
         if (opened.matches('.b-point')) setFocus(m, opened)
       }
       arrange(m)

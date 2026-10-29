@@ -11,17 +11,23 @@ import {
   fitZoom,
   initBoard,
   layoutTree,
-  pointSnippetHtml,
   MAX_ZOOM,
   MIN_ZOOM,
   MOVE_MS,
+  POINT_ZOOM,
   readOffsets,
   TREE,
   wheelZoom,
   writeOffsets,
   zoomLabel,
 } from './board.js'
-import { setRenderContext } from './layers.js'
+import { followLink } from './deep-link.js'
+
+// The deep links scroll a page this test has no layout for; the board's use of them is what counts.
+vi.mock('./deep-link.js', async original => ({
+  .../** @type {object} */ (await original()),
+  followLink: vi.fn(),
+}))
 
 /** @type {HTMLElement} */
 let root
@@ -66,6 +72,7 @@ function size(el, side) {
   if (el.hidden) return 0
   const open = el.classList.contains('is-open')
   if (el.matches('.board-viewport')) return side === 'w' ? 600 : 400
+  if (el.matches('.b-filepanel')) return side === 'w' ? 100 : 400
   if (el.matches('.b-root')) return side === 'w' ? (open ? 760 : 560) : open ? 300 : 80
   if (el.matches('.b-layer')) {
     const shut = el.querySelector('.layer-body')?.hasAttribute('hidden')
@@ -673,11 +680,11 @@ describe('initBoard', () => {
     pointer('pointerup', vp, {})
   })
 
-  it('opens a point a scroll lands on, and a file in the side panel, at full size first', () => {
+  it('opens a point a scroll lands on, and a file in the side panel, zoomed in first', () => {
     board = open('board')
     board.setZoom(FAR_ZOOM / 2)
     root.querySelector('#point-a')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
-    expect(board.zoom()).toBe(1)
+    expect(board.zoom()).toBeGreaterThan(FAR_ZOOM)
     // The closed layer opens, so the point is on the board, and the point opens.
     expect(bodyOf('layer-auth').hidden).toBe(false)
     expect(node('point-a').classList.contains('is-open')).toBe(true)
@@ -689,7 +696,8 @@ describe('initBoard', () => {
     expect(panel.hidden).toBe(true)
     board.setZoom(FAR_ZOOM / 2)
     root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
-    expect(board.zoom()).toBe(1)
+    // Zoomed back in, and the point in focus as far as it fits beside the panel.
+    expect(board.zoom()).toBeGreaterThan(FAR_ZOOM)
     expect(panel.hidden).toBe(false)
     expect(panel.querySelector('#file-auth')).not.toBeNull()
     expect(bodyOf('file-auth').hidden).toBe(false)
@@ -843,111 +851,6 @@ describe('the points a layer is reviewed through', () => {
   })
 })
 
-describe('pointSnippetHtml', () => {
-  // Twelve new lines in one hunk.
-  const PATCH = `@@ -0,0 +1,12 @@\n${Array.from({ length: 12 }, (_, i) => `+line ${i + 1}`).join('\n')}`
-  const ENTRY = /** @type {import('./contract-types.js').FileEntry} */ (
-    /** @type {unknown} */ ({
-      path: 'src/a.ts',
-      key: 'src_a_ts',
-      status: 'added',
-      additions: 12,
-      deletions: 0,
-      hunks: [{ id: 'src_a_ts#1', header: '', oldStart: 0, oldLines: 0, newStart: 1, newLines: 12 }],
-    })
-  )
-  /** @param {Partial<import('./contract-types.js').Point>} fields */
-  const point = fields => /** @type {import('./contract-types.js').Point} */ (
-    /** @type {unknown} */ ({ id: 'p', path: 'src/a.ts', line: 6, ...fields })
-  )
-  /** @param {string} html */
-  const lines = html => {
-    const holder = document.createElement('div')
-    holder.innerHTML = html
-    return Array.from(holder.querySelectorAll('tbody > tr td.ln:nth-child(2)'), td => td.textContent)
-  }
-
-  it('shows the lines around the point, read-only and without ids', () => {
-    const html = pointSnippetHtml(point({}), { files: [ENTRY], patches: { src_a_ts: PATCH } }, document)
-    expect(lines(html)).toEqual(['3', '4', '5', '6', '7', '8', '9'])
-    expect(html).not.toMatch(/ id=|data-hunk|data-key|class="plus"/)
-    // A range of lines shows from before its first to after its last.
-    const range = pointSnippetHtml(
-      point({ line: 2, endLine: 4 }),
-      { files: [ENTRY], patches: { src_a_ts: PATCH } },
-      document
-    )
-    expect(lines(range)).toEqual(['1', '2', '3', '4', '5', '6', '7'])
-  })
-
-  it('shows the start of the hunk for a point whose lines the hunk lacks', () => {
-    // The header claims a hundred lines; the rows hold twelve.
-    const hunk = /** @type {import('./contract-types.js').FileEntry['hunks'][number]} */ (ENTRY.hunks[0])
-    const wide = { ...ENTRY, hunks: [{ ...hunk, newLines: 100 }] }
-    const html = pointSnippetHtml(
-      point({ line: 50 }),
-      { files: [wide], patches: { src_a_ts: PATCH } },
-      document
-    )
-    expect(lines(html)).toEqual(['1', '2', '3', '4', '5', '6', '7'])
-  })
-
-  it('reads the old line numbers for a point on the old side', () => {
-    const rows = Array.from({ length: 12 }, (_, i) =>
-      i === 9 ? `-old ${i + 1}\n+new ${i + 1}` : ` line ${i + 1}`
-    )
-    const patch = `@@ -1,12 +1,12 @@\n${rows.join('\n')}`
-    const hunk = /** @type {import('./contract-types.js').FileEntry['hunks'][number]} */ (ENTRY.hunks[0])
-    const entry = { ...ENTRY, hunks: [{ ...hunk, oldStart: 1, oldLines: 12 }] }
-    const html = pointSnippetHtml(
-      point({ line: 10, side: 'old' }),
-      { files: [entry], patches: { src_a_ts: patch } },
-      document
-    )
-    const holder = document.createElement('div')
-    holder.innerHTML = html
-    const old = Array.from(holder.querySelectorAll('tbody > tr td.ln:first-child'), td => td.textContent)
-    // Lines 7 to 13 on the old side; the added line among them has no old number.
-    expect(old).toEqual(['7', '8', '9', '10', '', '11', '12'])
-  })
-
-  it('says so when the code is not available', () => {
-    expect(pointSnippetHtml(point({ path: 'gone.ts' }), { files: [ENTRY], patches: {} }, document)).toContain(
-      'not available'
-    )
-    expect(pointSnippetHtml(point({}), { files: [ENTRY], patches: null }, document)).toContain(
-      'not available'
-    )
-  })
-
-  it('adds the snippet under a point once, when it first opens', () => {
-    setRenderContext(
-      /** @type {Parameters<typeof setRenderContext>[0]} */ (
-        /** @type {unknown} */ ({
-          artifact: { points: [point({ id: 'a', path: 'src/a.ts' })] },
-          files: [ENTRY],
-          patches: { src_a_ts: PATCH },
-        })
-      )
-    )
-    window.location.hash = '#layer-auth'
-    board = open('board')
-    openAuth()
-    const title = node('point-a').querySelector('.p-title')
-    click(title)
-    expect(node('point-a').querySelectorAll('.b-snippet tbody > tr')).toHaveLength(7)
-    click(title)
-    click(title)
-    expect(node('point-a').querySelectorAll('.b-snippet')).toHaveLength(1)
-    // A point the canvas does not list gets none.
-    root.querySelector('#point-a')?.setAttribute('data-point', 'unknown')
-    node('point-a').querySelector('.b-snippet')?.remove()
-    click(title)
-    click(title)
-    expect(node('point-a').querySelector('.b-snippet')).toBeNull()
-  })
-})
-
 describe('the point in focus', () => {
   /** @returns {boolean} */
   const focused = () => main().classList.contains('has-focus')
@@ -1089,17 +992,33 @@ describe('the moves the board makes', () => {
     expect(board.zoom()).toBeCloseTo(0.4)
   })
 
-  it('brings a point it opens into the middle of the board, at the zoom the reader is at', () => {
+  it('brings a point it opens into the middle of the board, zoomed in a little', () => {
+    // A window wide enough for the point at the point's zoom.
+    fake('clientWidth', el => (el.matches('.board-viewport') ? 2000 : 0))
     window.location.hash = '#layer-auth'
     board = open('board')
     openAuth()
     board.setZoom(0.8)
     click(node('point-a').querySelector('.p-title'))
-    expect(board.zoom()).toBeCloseTo(0.8)
-    // Open, the point is 760 by 120: wider than the window's room at 0.8, so from its left.
+    expect(board.zoom()).toBeCloseTo(POINT_ZOOM)
+    // Open, the point is 760 by 120, which fits at that zoom: it is centered.
     const [px, py] = at(node('point-a'))
-    expect(viewport().scrollLeft).toBeCloseTo(px * 0.8 - 32)
-    expect(viewport().scrollTop).toBeCloseTo((py + 60) * 0.8 - 200)
+    expect(viewport().scrollLeft).toBeCloseTo((px + 380) * POINT_ZOOM - 1000)
+    expect(viewport().scrollTop).toBeCloseTo((py + 60) * POINT_ZOOM - 200)
+    // A reader zoomed in further stays as close.
+    click(node('point-a').querySelector('.p-title'))
+    board.setZoom(1.6)
+    click(node('point-a').querySelector('.p-title'))
+    expect(board.zoom()).toBeCloseTo(1.6)
+  })
+
+  it('zooms a point in only as far as it fits the window', () => {
+    window.location.hash = '#layer-auth'
+    board = open('board')
+    openAuth()
+    click(node('point-a').querySelector('.p-title'))
+    // 760 wide in the 536 of room.
+    expect(board.zoom()).toBeCloseTo(536 / 760)
   })
 
   it('stops a move when the board goes', () => {
@@ -1326,5 +1245,91 @@ describe('a layer whose points are all done', () => {
     await settle()
     expect(box.checked).toBe(true)
     expect(changes).not.toHaveBeenCalled()
+  })
+})
+
+describe('the side panel beside a point', () => {
+  it('moves the point in focus beside the panel, into the part of the board it leaves free', () => {
+    window.location.hash = '#layer-auth'
+    board = open('board')
+    openAuth()
+    click(node('point-a').querySelector('.p-title'))
+    root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
+    // The panel takes 100 of the 600: the point zooms to fit the 436 of room left of it, and its
+    // right edge stays clear of the panel.
+    expect(root.querySelector('.b-filepanel')?.hasAttribute('hidden')).toBe(false)
+    expect(board.zoom()).toBeCloseTo(436 / 760)
+    const [px] = at(node('point-a'))
+    const right = (px + 760) * board.zoom() - viewport().scrollLeft
+    expect(right).toBeLessThanOrEqual(500)
+  })
+
+  it('leaves the board where it is when no point is in focus', () => {
+    window.location.hash = '#layer-auth'
+    board = open('board')
+    viewport().scrollLeft = 123
+    root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
+    expect(viewport().scrollLeft).toBe(123)
+  })
+})
+
+describe('the points in the side panel', () => {
+  it('fold to their titles: a click on one opens it, and closing the panel folds them again', () => {
+    const point = document.createElement('tr')
+    point.className = 'ifind'
+    point.innerHTML =
+      '<td class="code x"><div class="x-in"><div class="f-title"><span class="p-title">Check A</span><a class="loc" href="#line:src/auth.ts:4">src/auth.ts:4</a></div><div class="prose">body</div></div></td>'
+    root.querySelector('#row-4')?.after(point)
+    board = open('board')
+    root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
+    const row = /** @type {HTMLElement} */ (root.querySelector('.b-filepanel tr.ifind'))
+    expect(row.classList.contains('b-open')).toBe(false)
+    click(row.querySelector('.p-title'))
+    expect(row.classList.contains('b-open')).toBe(true)
+    // A link in the title goes where it leads, and a click on the body folds nothing.
+    click(row.querySelector('.loc'))
+    click(row.querySelector('.prose'))
+    expect(row.classList.contains('b-open')).toBe(true)
+    click(row.querySelector('.p-title'))
+    expect(row.classList.contains('b-open')).toBe(false)
+    click(row.querySelector('.p-title'))
+    press('close-file')
+    expect(row.classList.contains('b-open')).toBe(false)
+    // A click in the panel outside any point changes nothing.
+    root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
+    click(root.querySelector('.b-filepanel-h'))
+    expect(row.classList.contains('b-open')).toBe(false)
+  })
+})
+
+describe('the file of the point in focus', () => {
+  it('opens in the side panel at the point line, and closes once no point is in focus', () => {
+    vi.mocked(followLink).mockClear()
+    window.location.hash = '#layer-auth'
+    board = open('board')
+    openAuth()
+    click(node('point-a').querySelector('.p-title'))
+    expect(followLink).toHaveBeenCalledWith('#line:src/auth.ts:4', root)
+    // The deep link lands on the row, which opens the panel; here it is raised by hand.
+    root.querySelector('#row-4')?.dispatchEvent(new Event('reveal-code', { bubbles: true }))
+    const panel = /** @type {HTMLElement} */ (root.querySelector('.b-filepanel'))
+    expect(panel.hidden).toBe(false)
+    // Focus held by the same point opens nothing again.
+    click(node('point-a').querySelector('.prose'))
+    expect(followLink).toHaveBeenCalledTimes(1)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(panel.hidden).toBe(true)
+    expect(root.querySelector('#layer-auth .files > pr-file > #file-auth')).not.toBeNull()
+  })
+
+  it('opens no file for a point with no line to link to', () => {
+    vi.mocked(followLink).mockClear()
+    root.querySelector('#point-a .loc')?.remove()
+    window.location.hash = '#layer-auth'
+    board = open('board')
+    openAuth()
+    click(node('point-a').querySelector('.p-title'))
+    expect(followLink).not.toHaveBeenCalled()
+    expect(root.querySelector('.b-filepanel')?.hasAttribute('hidden')).toBe(true)
   })
 })

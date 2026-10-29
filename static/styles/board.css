@@ -7,9 +7,6 @@
   grid-template-columns: minmax(0, 1fr);
   background: none;
 }
-.layout:has(> main.board) > .rail {
-  display: none;
-}
 main.board {
   position: relative;
   display: flex;
@@ -31,12 +28,10 @@ main.board > :not(.board-viewport, .board-tools, .b-filepanel) {
   cursor: grab;
   background-color: var(--bg);
 }
-main.is-panning .board-viewport {
-  cursor: grabbing;
-}
 main:is(.is-panning, .is-dragging) {
   user-select: none;
 }
+main.is-panning .board-viewport,
 main.is-dragging,
 main.is-dragging .board-viewport * {
   cursor: grabbing;
@@ -44,10 +39,10 @@ main.is-dragging .board-viewport * {
 .board-plane {
   position: relative;
 }
+/* The SVG's width and height attributes size it; the inset only places it. */
 .board-lines {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   overflow: visible;
   pointer-events: none;
 }
@@ -63,8 +58,7 @@ main.is-dragging .board-viewport * {
 }
 .board-tools {
   position: absolute;
-  left: 16px;
-  bottom: 16px;
+  inset: auto auto 16px 16px;
   z-index: 5;
   display: flex;
   align-items: center;
@@ -109,9 +103,9 @@ main.is-far .bnode * {
   overflow: hidden;
 }
 
-/* The root: the header's title block, moved here, and the overview once opened. */
-/* As wide as its title on one line, and no less than 560; open, no less than 760. The overview
-   takes no part in that width, so its text wraps to the title instead of stretching the card. */
+/* The root: the header's title block, moved here, and the overview once opened. It is as wide as
+   its title on one line, and no less than 560; open, no less than 760. The overview takes no part
+   in that width, so its text wraps to the title instead of stretching the card. */
 .bnode.b-root {
   width: max-content;
   min-width: 560px;
@@ -167,18 +161,11 @@ main.is-far .bnode * {
 .b-root.is-open #overview > .panel-h h2::before {
   content: '▾ ';
 }
-/* The board shows no diff but in the side panel, so the Hide code control has nothing to hide. */
-.layout > main.board .b-root .hdr-title .reading {
-  display: none;
-}
-.b-root:not(.is-open) #overview > :not(.panel-h, .body:not(.pr-desc, .conversation)) {
-  display: none;
-}
 
-/* A layer: its title, its count of points done, and its rationale; its tests once opened. Its points
-   hang below it as nodes of their own; its files have none. The board has room, so the card is as wide as its title bar on
-   one line, and no less than 300; open, no less than 560. The body takes no part in that width, so
-   a long paragraph wraps to the title bar instead of stretching the card. */
+/* A layer: its title, its count of points done, and its rationale; its tests once opened. Its
+   points hang below it as nodes of their own; its files have none. The card is as wide as its title
+   bar on one line, and no less than 300; open, no less than 560. The body takes no part in that
+   width, so a long paragraph wraps to the title bar instead of stretching the card. */
 .b-layer > pr-layer > section {
   border-top: 4px solid var(--dc);
 }
@@ -197,11 +184,6 @@ main.is-far .bnode * {
   padding: 0 14px 12px;
   font-size: 13px;
 }
-.b-layer section > .rationale:empty,
-.b-layer .layer-body > .body:empty,
-.b-layer .layer-h h2 .lbl {
-  display: none;
-}
 .b-layer .layer-h {
   border-bottom: 0;
   background: transparent;
@@ -211,13 +193,6 @@ main.is-far .bnode * {
   font-size: 15px;
   cursor: pointer;
 }
-.layout > main.board .b-layer :is(.layer-points, .files, .layer-end),
-.b-layer .lbl.sub:has(+ .files),
-.layout > main.board .b-layer .layer-ctl .cmd[data-act='ask'],
-.layout > main.board .b-layer:not(.no-points) .layer-ctl .chk {
-  display: none;
-}
-/* A layer is reviewed through its points; one with none keeps its own reviewed box. */
 .b-progress {
   flex: none;
   padding: 1px 8px;
@@ -254,12 +229,6 @@ main.board:has(> .b-filepanel:not([hidden])) .b-point.is-open {
 .b-point .f-title {
   font-size: 13px;
 }
-.b-point:not(.is-open) .findings > li > div > :not(.f-title),
-.b-point:not(.is-open) .f-title :is(.pill.kind, .p-toggle),
-.b-point .f-title .loc {
-  /* The point's file opens beside it in the side panel; the board reads its line from this link. */
-  display: none;
-}
 
 /* An opened point takes the focus: the rest of the board fades behind it, and comes back once the
    point closes, the reader clicks elsewhere, or presses Escape. */
@@ -270,20 +239,12 @@ main.board:has(> .b-filepanel:not([hidden])) .b-point.is-open {
 main.has-focus :is(.bnode:not(.is-focus), .board-lines) {
   opacity: 0.1;
 }
-@media (prefers-reduced-motion: reduce) {
-  .bnode,
-  .board-lines {
-    transition: none;
-  }
-}
 
 /* A file has no node: the point in focus, or a link into a file, opens it in this panel over the
-   side of the board. */
-.b-filepanel {
+   side of the board. Hidden, the panel keeps the browser's own `display: none`. */
+.b-filepanel:not([hidden]) {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0 0 0 auto;
   z-index: 6;
   display: flex;
   flex-direction: column;
@@ -293,9 +254,6 @@ main.has-focus :is(.bnode:not(.is-focus), .board-lines) {
   border-left: 1px solid var(--line);
   background: var(--panel);
   box-shadow: -8px 0 24px color-mix(in srgb, var(--shadow) 25%, transparent);
-}
-.b-filepanel[hidden] {
-  display: none;
 }
 .b-filepanel-h {
   display: flex;
@@ -310,12 +268,8 @@ main.has-focus :is(.bnode:not(.is-focus), .board-lines) {
 }
 /* In the panel the points in the diff are one line each, so the code reads on; a click on a
    point's title opens the rest of it. The point itself is on the board. */
-.b-filepanel tr.ifind:not(.b-open) .x-in > :not(.f-title) {
-  display: none;
-}
 .b-filepanel tr.ifind:not(.b-open) :is(.x, .x-in) {
-  padding-top: 2px;
-  padding-bottom: 2px;
+  padding-block: 2px;
 }
 .b-filepanel tr.ifind .f-title {
   cursor: pointer;
@@ -328,6 +282,27 @@ main.has-focus :is(.bnode:not(.is-focus), .board-lines) {
 }
 .b-filepanel tr.ifind.b-open .f-title::after {
   content: '▾';
+}
+
+/* What the board does not show. */
+.layout:has(> main.board) > .rail,
+/* The diff shows only in the side panel, so the Hide code control has nothing to hide. */
+.layout > main.board .b-root .hdr-title .reading,
+.b-root:not(.is-open) #overview > :not(.panel-h, .body:not(.pr-desc, .conversation)),
+.b-layer section > .rationale:empty,
+.b-layer .layer-body > .body:empty,
+.b-layer .layer-h h2 .lbl,
+/* A layer is reviewed through its points; one with none keeps its own reviewed box. */
+.layout > main.board .b-layer :is(.layer-points, .files, .layer-end),
+.b-layer .lbl.sub:has(+ .files),
+.layout > main.board .b-layer .layer-ctl .cmd[data-act='ask'],
+.layout > main.board .b-layer:not(.no-points) .layer-ctl .chk,
+.b-point:not(.is-open) .findings > li > div > :not(.f-title),
+.b-point:not(.is-open) .f-title :is(.pill.kind, .p-toggle),
+/* The point's file opens beside it in the side panel; the board reads its line from this link. */
+.b-point .f-title .loc,
+.b-filepanel tr.ifind:not(.b-open) .x-in > :not(.f-title) {
+  display: none;
 }
 
 /* ---- The chat pane floats over the board at every width, as on a narrow screen. ---- */
